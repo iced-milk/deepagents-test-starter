@@ -7,6 +7,17 @@ import { z } from 'zod';
 type Model = Awaited<ReturnType<typeof initChatModel>>;
 type Agent = ReturnType<typeof createDeepAgent>;
 
+// ─── Unified logger with [tool][timestamp] prefix ───
+
+const logger = {
+    log(...args: unknown[]) {
+        console.log(`[tool][${new Date().toISOString()}]`, ...args);
+    },
+    error(...args: unknown[]) {
+        console.error(`[tool][${new Date().toISOString()}]`, ...args);
+    },
+};
+
 interface EnvConfig {
     LLM_MODEL: string;
     LLM_API_KEY: string;
@@ -48,7 +59,7 @@ const SYSTEM_PROMPT = `You are a helpful assistant. Today's date is ${new Date()
 
 async function getModel(env: EnvConfig) {
     if (!model) {
-        console.log('Initializing model...');
+        logger.log('Initializing model...');
         model = await initChatModel(env.LLM_MODEL, {
             modelProvider: "openai",
             apiKey: env.LLM_API_KEY,
@@ -64,7 +75,7 @@ async function getModel(env: EnvConfig) {
 
 function getAgent(modelInstance: Model) {
     if (!agent) {
-        console.log('Initializing agent...');
+        logger.log('Initializing agent...');
         agent = createDeepAgent({
             model: modelInstance,
             systemPrompt: SYSTEM_PROMPT,
@@ -98,11 +109,11 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
             if (AIMessageChunk.isInstance(message) && message.tool_call_chunks?.length) {
                 for (const tc of message.tool_call_chunks) {
                     if (tc.name) {
-                        console.log(`[tool] tool call: ${tc.name}`);
+                        logger.log(`tool call: ${tc.name}`);
                         yield `data: ${JSON.stringify({ type: 'tool_call', name: tc.name })}\n\n`;
                     }
                     if (tc.args) {
-                        console.log(`[tool] tool call args: ${tc.args}`);
+                        logger.log(`tool call args: ${tc.args}`);
                     }
                 }
                 continue;
@@ -110,7 +121,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
 
             // Tool results
             if (ToolMessage.isInstance(message)) {
-                console.log(`[tool] tool result [${message.name}]: ${message.text?.slice(0, 150)}`);
+                logger.log(`tool result [${message.name}]: ${message.text?.slice(0, 150)}`);
                 yield `data: ${JSON.stringify({ type: 'tool_result', name: message.name, content: message.text?.slice(0, 500) })}\n\n`;
                 continue;
             }
@@ -119,7 +130,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
             if (AIMessageChunk.isInstance(message) && message.text) {
                 const cleaned = message.text.replace(/\n{3,}/g, '\n\n');
                 if (cleaned) {
-                    console.log('[tool] ai response:', cleaned);
+                    logger.log('ai response:', cleaned);
                     yield `data: ${JSON.stringify({ type: 'ai_response', content: cleaned })}\n\n`;
                 }
             }
@@ -127,9 +138,9 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
     } catch (e: unknown) {
         const error = e as Error;
         if (error.name === 'AbortError' || signal?.aborted) {
-            console.log('[tool] aborted by user');
+            logger.log('aborted by user');
         } else {
-            console.error('[tool] error:', error.message, error.stack);
+            logger.error('error:', error.message, error.stack);
             yield `data: ${JSON.stringify({ type: 'error_message', content: `Stream error: ${error.message}` })}\n\n`;
         }
     }
@@ -142,7 +153,7 @@ export async function onRequest(context: any) {
 
     const { LLM_MODEL, LLM_API_KEY, LLM_BASE_URL } = env;
     if (!LLM_MODEL || !LLM_API_KEY || !LLM_BASE_URL) {
-        console.error('Missing environment variables');
+        logger.error('Missing environment variables');
         return new Response('Missing environment variables', { status: 500 });
     }
 
@@ -150,9 +161,9 @@ export async function onRequest(context: any) {
     const agentInstance = getAgent(modelInstance);
 
     const { message } = request?.body ?? {};
-    console.log('[tool] user message:', message);
+    logger.log('user message:', message);
     if (!message) {
-        console.error('Missing chat message');
+        logger.error('Missing chat message');
         return new Response('Missing chat message', { status: 400 });
     }
 
@@ -175,7 +186,7 @@ export async function onRequest(context: any) {
             }
         },
         cancel() {
-            console.log('[tool] client disconnected');
+            logger.log('client disconnected');
         },
     });
 

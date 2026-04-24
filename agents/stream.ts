@@ -5,6 +5,17 @@ import { createDeepAgent } from 'deepagents';
 type Model = Awaited<ReturnType<typeof initChatModel>>;
 type Agent = ReturnType<typeof createDeepAgent>;
 
+// ─── Unified logger with [stream][timestamp] prefix ───
+
+const logger = {
+    log(...args: unknown[]) {
+        console.log(`[stream][${new Date().toISOString()}]`, ...args);
+    },
+    error(...args: unknown[]) {
+        console.error(`[stream][${new Date().toISOString()}]`, ...args);
+    },
+};
+
 interface EnvConfig {
     LLM_MODEL: string;
     LLM_API_KEY: string;
@@ -19,7 +30,7 @@ const SYSTEM_PROMPT = 'You are a helpful assistant. Answer questions concisely a
 
 async function getModel(env: EnvConfig) {
     if (!model) {
-        console.log('Initializing model...');
+        logger.log('Initializing model...');
         model = await initChatModel(env.LLM_MODEL, {
             modelProvider: "openai",
             apiKey: env.LLM_API_KEY,
@@ -35,7 +46,7 @@ async function getModel(env: EnvConfig) {
 
 function getAgent(modelInstance: Model) {
     if (!agent) {
-        console.log('Initializing agent...');
+        logger.log('Initializing agent...');
         agent = createDeepAgent({
             model: modelInstance,
             systemPrompt: SYSTEM_PROMPT,
@@ -65,7 +76,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
             if (AIMessageChunk.isInstance(message) && message.text) {
                 const cleaned = message.text.replace(/\n{3,}/g, '\n\n');
                 if (cleaned) {
-                    console.log('[stream] ai response:', cleaned);
+                    logger.log('ai response:', cleaned);
                     yield `data: ${JSON.stringify({ type: 'ai_response', content: cleaned })}\n\n`;
                 }
             }
@@ -73,9 +84,9 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
     } catch (e: unknown) {
         const error = e as Error;
         if (error.name === 'AbortError' || signal?.aborted) {
-            console.log('[stream] aborted by user');
+            logger.log('aborted by user');
         } else {
-            console.error('[stream] error:', error.message, error.stack);
+            logger.error('error:', error.message, error.stack);
             yield `data: ${JSON.stringify({ type: 'error_message', content: `Stream error: ${error.message}` })}\n\n`;
         }
     }
@@ -88,7 +99,7 @@ export async function onRequest(context: any) {
 
     const { LLM_MODEL, LLM_API_KEY, LLM_BASE_URL } = env;
     if (!LLM_MODEL || !LLM_API_KEY || !LLM_BASE_URL) {
-        console.error('Missing environment variables');
+        logger.error('Missing environment variables');
         return new Response('Missing environment variables', { status: 500 });
     }
 
@@ -96,9 +107,9 @@ export async function onRequest(context: any) {
     const agentInstance = getAgent(modelInstance);
 
     const { message } = request?.body ?? {};
-    console.log('[stream] user message:', message);
+    logger.log('user message:', message);
     if (!message) {
-        console.error('Missing chat message');
+        logger.error('Missing chat message');
         return new Response('Missing chat message', { status: 400 });
     }
 
@@ -122,7 +133,7 @@ export async function onRequest(context: any) {
         },
         cancel() {
             // Triggered when the client disconnects
-            console.log('[stream] client disconnected');
+            logger.log('client disconnected');
         },
     });
 

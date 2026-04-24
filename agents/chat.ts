@@ -5,6 +5,17 @@ import { createDeepAgent } from 'deepagents';
 type Model = Awaited<ReturnType<typeof initChatModel>>;
 type Agent = ReturnType<typeof createDeepAgent>;
 
+// ─── Unified logger with [chat][timestamp] prefix ───
+
+const logger = {
+    log(...args: unknown[]) {
+        console.log(`[chat][${new Date().toISOString()}]`, ...args);
+    },
+    error(...args: unknown[]) {
+        console.error(`[chat][${new Date().toISOString()}]`, ...args);
+    },
+};
+
 interface EnvConfig {
     LLM_MODEL: string;
     LLM_API_KEY: string;
@@ -19,7 +30,7 @@ const SYSTEM_PROMPT = 'You are a helpful assistant. Answer questions concisely a
 
 async function getModel(env: EnvConfig) {
     if (!model) {
-        console.log('Initializing model...');
+        logger.log('Initializing model...');
         model = await initChatModel(env.LLM_MODEL, {
             modelProvider: "openai",
             apiKey: env.LLM_API_KEY,
@@ -35,7 +46,7 @@ async function getModel(env: EnvConfig) {
 
 function getAgent(modelInstance: Model) {
     if (!agent) {
-        console.log('Initializing agent...');
+        logger.log('Initializing agent...');
         agent = createDeepAgent({
             model: modelInstance,
             systemPrompt: SYSTEM_PROMPT,
@@ -53,7 +64,7 @@ export async function onRequest(context: any) {
 
     const { LLM_MODEL, LLM_API_KEY, LLM_BASE_URL } = env;
     if (!LLM_MODEL || !LLM_API_KEY || !LLM_BASE_URL) {
-        console.error('Missing environment variables');
+        logger.error('Missing environment variables');
         return new Response('Missing environment variables', { status: 500 });
     }
 
@@ -61,9 +72,9 @@ export async function onRequest(context: any) {
     const agentInstance = getAgent(modelInstance);
 
     const { message: userMessage } = request?.body ?? {};
-    console.log('[chat] user message:', userMessage);
+    logger.log('user message:', userMessage);
     if (!userMessage) {
-        console.error('Missing chat message');
+        logger.error('Missing chat message');
         return new Response('Missing chat message', { status: 400 });
     }
 
@@ -74,7 +85,7 @@ export async function onRequest(context: any) {
             { signal },
         );
         const messages = (result as any).messages;
-        console.log('[chat] ai:', messages[messages.length - 1].content);
+        logger.log('ai:', messages[messages.length - 1].content);
 
         return new Response(JSON.stringify({ response: messages[messages.length - 1].content }), {
             status: 200,
@@ -84,10 +95,10 @@ export async function onRequest(context: any) {
         const error = e as Error;
         // Re-throw AbortError so the Runtime returns 499
         if (error.name === 'AbortError' || signal?.aborted) {
-            console.log('[chat] aborted by user');
+            logger.log('aborted by user');
             throw error;
         }
-        console.error('[chat] error:', error.message);
+        logger.error('error:', error.message);
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json; charset=UTF-8' },

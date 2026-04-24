@@ -5,6 +5,17 @@ import { createDeepAgent, type SubAgent } from 'deepagents';
 type Model = Awaited<ReturnType<typeof initChatModel>>;
 type Agent = ReturnType<typeof createDeepAgent>;
 
+// ─── Unified logger with [subagent][timestamp] prefix ───
+
+const logger = {
+    log(...args: unknown[]) {
+        console.log(`[subagent][${new Date().toISOString()}]`, ...args);
+    },
+    error(...args: unknown[]) {
+        console.error(`[subagent][${new Date().toISOString()}]`, ...args);
+    },
+};
+
 interface EnvConfig {
     LLM_MODEL: string;
     LLM_API_KEY: string;
@@ -29,7 +40,7 @@ const researchSubagent: SubAgent = {
 
 async function getModel(env: EnvConfig) {
     if (!model) {
-        console.log('Initializing model...');
+        logger.log('Initializing model...');
         model = await initChatModel(env.LLM_MODEL, {
             modelProvider: "openai",
             apiKey: env.LLM_API_KEY,
@@ -45,7 +56,7 @@ async function getModel(env: EnvConfig) {
 
 function getAgent(modelInstance: Model) {
     if (!agent) {
-        console.log('Initializing agent with subagents...');
+        logger.log('Initializing agent with subagents...');
         agent = createDeepAgent({
             model: modelInstance,
             systemPrompt: SYSTEM_PROMPT,
@@ -71,7 +82,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
 
     try {
         // Single stream with multiple modes: "updates" for lifecycle, "messages" for tokens
-        console.log(`[subagent] starting combined stream for message: "${userMessage.slice(0, 80)}"`);
+        logger.log(`starting combined stream for message: "${userMessage.slice(0, 80)}"`);
         const stream = await agentInstance.stream(input, {
             streamMode: ["updates", "messages"],
             subgraphs: true,
@@ -97,22 +108,22 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
                                         description: tc.args?.description?.slice(0, 80) ?? '',
                                         status: 'pending',
                                     });
-                                    console.log(`[subagent] [lifecycle] PENDING  → subagent "${tc.args?.subagent_type}" (${tc.id})`);
-                                    console.log(`[subagent]   description: ${tc.args?.description?.slice(0, 80) ?? 'N/A'}`);
+                                    logger.log(`[lifecycle] PENDING  → subagent "${tc.args?.subagent_type}" (${tc.id})`);
+                                    logger.log(`  description: ${tc.args?.description?.slice(0, 80) ?? 'N/A'}`);
                                     yield `data: ${JSON.stringify({ type: 'subagent_lifecycle', status: 'pending', agent: tc.args?.subagent_type, id: tc.id, description: tc.args?.description?.slice(0, 80) })}\n\n`;
                                 }
                             }
                         }
                         // Log non-task model_request steps
                         if (!messages.some((m: any) => m.tool_calls?.some((tc: any) => tc.name === 'task'))) {
-                            console.log(`[subagent] [updates] [main agent] step: ${nodeName}`);
+                            logger.log(`[updates] [main agent] step: ${nodeName}`);
                         }
                     }
 
                     // Phase 2: events from tools:UUID namespace → subagent is running
                     if (namespace.length > 0 && namespace[0].startsWith('tools:')) {
                         const subagentNs = namespace[0];
-                        console.log(`[subagent] [updates] [${subagentNs}] step: ${nodeName}`);
+                        logger.log(`[updates] [${subagentNs}] step: ${nodeName}`);
 
                         // Match namespace to a pending subagent (only once per namespace).
                         // Note: the UUID in "tools:UUID" is a Pregel Task ID (uuid5 hash),
@@ -124,7 +135,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
                                     sub.status = 'running';
                                     nsToAgentName.set(subagentNs, sub.type);
                                     nsToToolCallId.set(subagentNs, toolCallId);
-                                    console.log(`[subagent] [lifecycle] RUNNING  → subagent "${sub.type}" (tool_call_id: ${toolCallId}, ns: ${subagentNs})`);
+                                    logger.log(`[lifecycle] RUNNING  → subagent "${sub.type}" (tool_call_id: ${toolCallId}, ns: ${subagentNs})`);
                                     yield `data: ${JSON.stringify({ type: 'subagent_lifecycle', status: 'running', agent: sub.type, id: toolCallId, namespace: subagentNs })}\n\n`;
                                     break;
                                 }
@@ -139,8 +150,8 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
                                 const sub = activeSubagents.get(msg.tool_call_id);
                                 if (sub) {
                                     sub.status = 'complete';
-                                    console.log(`[subagent] [lifecycle] COMPLETE → subagent "${sub.type}" (${msg.tool_call_id})`);
-                                    console.log(`[subagent]   Result preview: ${String(msg.content).slice(0, 200)}...`);
+                                    logger.log(`[lifecycle] COMPLETE → subagent "${sub.type}" (${msg.tool_call_id})`);
+                                    logger.log(`  Result preview: ${String(msg.content).slice(0, 200)}...`);
                                 }
                                 yield `data: ${JSON.stringify({ type: 'subagent_lifecycle', status: 'complete', agent: sub?.type ?? msg.name, id: msg.tool_call_id, content: String(msg.content).slice(0, 500) })}\n\n`;
                             }
@@ -149,7 +160,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
 
                     // Log other main agent steps (not model_request or tools)
                     if (namespace.length === 0 && nodeName !== 'model_request' && nodeName !== 'tools') {
-                        console.log(`[subagent] [updates] [main agent] step: ${nodeName}`);
+                        logger.log(`[updates] [main agent] step: ${nodeName}`);
                     }
                 }
             } else if (mode === 'messages') {
@@ -162,43 +173,43 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
                     const agentName = nsToAgentName.get(subagentNs) ?? 'unknown';
                     if (subagentNs !== currentSource) {
                         currentSource = subagentNs;
-                        console.log(`[subagent] --- [${agentName} (${subagentNs})] ---`);
+                        logger.log(`--- [${agentName} (${subagentNs})] ---`);
                         yield `data: ${JSON.stringify({ type: 'source_switch', agent: agentName, namespace: subagentNs })}\n\n`;
                     }
                     if (message.text) {
-                        console.log(`[subagent] [token] [${agentName}] ${message.text}`);
+                        logger.log(`[token] [${agentName}] ${message.text}`);
                         yield `data: ${JSON.stringify({ type: 'ai_response', content: message.text, agent: agentName, namespace: subagentNs })}\n\n`;
                     }
                 } else {
                     // Token from the main agent
                     if ('main' !== currentSource) {
                         currentSource = 'main';
-                        console.log(`[subagent] --- [main agent] ---`);
+                        logger.log('--- [main agent] ---');
                         yield `data: ${JSON.stringify({ type: 'source_switch', agent: 'main' })}\n\n`;
                     }
                     if (message.text) {
-                        console.log(`[subagent] [token] [main] ${message.text}`);
+                        logger.log(`[token] [main] ${message.text}`);
                         yield `data: ${JSON.stringify({ type: 'ai_response', content: message.text, agent: 'main' })}\n\n`;
                     }
                 }
             }
         }
-        console.log('[subagent] stream completed');
+        logger.log('stream completed');
     } catch (e: unknown) {
         const error = e as Error;
         if (error.name === 'AbortError' || signal?.aborted) {
-            console.log('[subagent] aborted by user');
+            logger.log('aborted by user');
         } else {
-            console.error('[subagent] stream error:', error.message, error.stack);
+            logger.error('stream error:', error.message, error.stack);
             yield `data: ${JSON.stringify({ type: 'error_message', content: `Stream error: ${error.message}` })}\n\n`;
         }
     }
 
     // Log final subagent states
     if (activeSubagents.size > 0) {
-        console.log('[subagent] --- Final subagent states ---');
+        logger.log('--- Final subagent states ---');
         for (const [id, sub] of activeSubagents) {
-            console.log(`[subagent]   ${sub.type}: ${sub.status}`);
+            logger.log(`  ${sub.type}: ${sub.status}`);
         }
     }
 
@@ -210,7 +221,7 @@ export async function onRequest(context: any) {
 
     const { LLM_MODEL, LLM_API_KEY, LLM_BASE_URL } = env;
     if (!LLM_MODEL || !LLM_API_KEY || !LLM_BASE_URL) {
-        console.error('Missing environment variables');
+        logger.error('Missing environment variables');
         return new Response('Missing environment variables', { status: 500 });
     }
 
@@ -218,9 +229,9 @@ export async function onRequest(context: any) {
     const agentInstance = getAgent(modelInstance);
 
     const { message } = request?.body ?? {};
-    console.log('[subagent] user message:', message);
+    logger.log('user message:', message);
     if (!message) {
-        console.error('Missing chat message');
+        logger.error('Missing chat message');
         return new Response('Missing chat message', { status: 400 });
     }
 
@@ -243,7 +254,7 @@ export async function onRequest(context: any) {
             }
         },
         cancel() {
-            console.log('[subagent] client disconnected');
+            logger.log('client disconnected');
         },
     });
 
