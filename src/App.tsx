@@ -98,15 +98,16 @@ export default function App() {
   };
 
   const handleStop = useCallback(async () => {
-    // 1. 先请求后端打断当前活跃的 agent 运行
     try {
       await fetch('/stop', { method: 'POST' });
     } catch {
-      // 忽略 stop 请求失败（可能没有活跃运行）
+      // 忽略 stop 请求失败
     }
-    // 2. 再 abort 前端的 fetch 连接
+    // 前端 abort fetch 连接（断开 SSE 读取 / JSON 等待）
     abortRef.current?.abort();
-  }, []);
+    // 显示提示
+    appendLine({ kind: 'status', tag: 'STOPPED', tagClass: 'stopped', content: 'Request aborted by user.' });
+  }, [appendLine]);
 
   const handleClear = () => {
     setLines([]);

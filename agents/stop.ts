@@ -1,4 +1,4 @@
-// 打断当前活跃的 agent 运行
+// Abort the currently active agent run
 export async function onRequest(context: any) {
   const ret = context.abortActiveRun();
   const data =  {

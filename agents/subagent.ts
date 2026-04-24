@@ -60,7 +60,7 @@ function getAgent(modelInstance: Model) {
 }
 
 // Yields SSE events from a subagent-enabled agent using a single combined stream.
-async function* eventStream(agentInstance: Agent, userMessage: string): AsyncGenerator<string> {
+async function* eventStream(agentInstance: Agent, userMessage: string, signal?: AbortSignal): AsyncGenerator<string> {
     const input = { messages: [{ role: "user", content: userMessage }] };
     const activeSubagents = new Map<string, { type: string; description: string; status: string }>();
     // Maps tools:UUID namespace → readable agent name (e.g. "research-agent")
@@ -75,9 +75,11 @@ async function* eventStream(agentInstance: Agent, userMessage: string): AsyncGen
         const stream = await agentInstance.stream(input, {
             streamMode: ["updates", "messages"],
             subgraphs: true,
+            signal,
         });
 
         for await (const [namespace, mode, data] of stream) {
+            if (signal?.aborted) break;
             const isSubagent = namespace.some((s: string) => s.startsWith('tools:'));
 
             if (mode === 'updates') {
@@ -184,8 +186,12 @@ async function* eventStream(agentInstance: Agent, userMessage: string): AsyncGen
         console.log('[subagent] stream completed');
     } catch (e: unknown) {
         const error = e as Error;
-        console.error('[subagent] stream error:', error.message, error.stack);
-        yield `data: ${JSON.stringify({ type: 'error_message', content: `Stream error: ${error.message}` })}\n\n`;
+        if (error.name === 'AbortError' || signal?.aborted) {
+            console.log('[subagent] aborted by user');
+        } else {
+            console.error('[subagent] stream error:', error.message, error.stack);
+            yield `data: ${JSON.stringify({ type: 'error_message', content: `Stream error: ${error.message}` })}\n\n`;
+        }
     }
 
     // Log final subagent states
@@ -218,20 +224,26 @@ export async function onRequest(context: any) {
         return new Response('Missing chat message', { status: 400 });
     }
 
+    const signal = request?.signal as AbortSignal | undefined;
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
         async start(controller) {
             try {
-                for await (const chunk of eventStream(agentInstance, message)) {
+                for await (const chunk of eventStream(agentInstance, message, signal)) {
+                    if (signal?.aborted) break;
                     controller.enqueue(encoder.encode(chunk));
                 }
             } catch (e) {
                 const error = e as Error;
+                if (error.name === 'AbortError' || signal?.aborted) return;
                 const errorEvent = `data: ${JSON.stringify({ type: "error_message", content: error.message, source: "main", node: "system" })}\n\n`;
                 controller.enqueue(encoder.encode(errorEvent));
             } finally {
                 controller.close();
             }
+        },
+        cancel() {
+            console.log('[subagent] client disconnected');
         },
     });
 

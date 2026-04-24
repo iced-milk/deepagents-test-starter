@@ -83,14 +83,15 @@ function getAgent(modelInstance: Model) {
 /**
  * Async generator that yields SSE-formatted AI content tokens.
  */
-async function* eventStream(agentInstance: Agent, userMessage: string): AsyncGenerator<string> {
+async function* eventStream(agentInstance: Agent, userMessage: string, signal?: AbortSignal): AsyncGenerator<string> {
     try {
         const stream = await agentInstance.stream(
             { messages: [{ role: "user", content: userMessage }] },
-            { streamMode: "messages" }
+            { streamMode: "messages", signal }
         );
 
         for await (const chunk of stream) {
+            if (signal?.aborted) break;
             const [message] = chunk;
 
             // Streaming tool calls
@@ -125,8 +126,12 @@ async function* eventStream(agentInstance: Agent, userMessage: string): AsyncGen
         }
     } catch (e: unknown) {
         const error = e as Error;
-        console.error('[tool] error:', error.message, error.stack);
-        yield `data: ${JSON.stringify({ type: 'error_message', content: `Stream error: ${error.message}` })}\n\n`;
+        if (error.name === 'AbortError' || signal?.aborted) {
+            console.log('[tool] aborted by user');
+        } else {
+            console.error('[tool] error:', error.message, error.stack);
+            yield `data: ${JSON.stringify({ type: 'error_message', content: `Stream error: ${error.message}` })}\n\n`;
+        }
     }
 
     yield "data: [DONE]\n\n";
@@ -151,20 +156,26 @@ export async function onRequest(context: any) {
         return new Response('Missing chat message', { status: 400 });
     }
 
+    const signal = request?.signal as AbortSignal | undefined;
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
         async start(controller) {
             try {
-                for await (const chunk of eventStream(agentInstance, message)) {
+                for await (const chunk of eventStream(agentInstance, message, signal)) {
+                    if (signal?.aborted) break;
                     controller.enqueue(encoder.encode(chunk));
                 }
             } catch (e) {
                 const error = e as Error;
+                if (error.name === 'AbortError' || signal?.aborted) return;
                 const errorEvent = `data: ${JSON.stringify({ type: "error_message", content: error.message, source: "main", node: "system" })}\n\n`;
                 controller.enqueue(encoder.encode(errorEvent));
             } finally {
                 controller.close();
             }
+        },
+        cancel() {
+            console.log('[tool] client disconnected');
         },
     });
 

@@ -67,15 +67,31 @@ export async function onRequest(context: any) {
         return new Response('Missing chat message', { status: 400 });
     }
 
-    const result = await agentInstance.invoke({
-        messages: [{ role: "user", content: userMessage }],
-    });
-    const messages = (result as any).messages;
-    console.log('[chat] ai:', messages[messages.length - 1].content);
+    const signal = request?.signal as AbortSignal | undefined;
+    try {
+        const result = await agentInstance.invoke(
+            { messages: [{ role: "user", content: userMessage }] },
+            { signal },
+        );
+        const messages = (result as any).messages;
+        console.log('[chat] ai:', messages[messages.length - 1].content);
 
-    return new Response(JSON.stringify({ response: messages[messages.length - 1].content }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
-    });
+        return new Response(JSON.stringify({ response: messages[messages.length - 1].content }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+        });
+    } catch (e: unknown) {
+        const error = e as Error;
+        // Re-throw AbortError so the Runtime returns 499
+        if (error.name === 'AbortError' || signal?.aborted) {
+            console.log('[chat] aborted by user');
+            throw error;
+        }
+        console.error('[chat] error:', error.message);
+        return new Response(JSON.stringify({ error: error.message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+        });
+    }
 }
 
