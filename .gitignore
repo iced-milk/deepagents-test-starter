@@ -1,0 +1,13 @@
+dist
+node_modules
+
+.DS_Store
+
+# Tencent Cloud EdgeOne
+.env
+.edgeone/*
+.tef_dist/*
+
+# Winston logs (@phukon/duckduckgo-search)
+combined.log
+error.log
