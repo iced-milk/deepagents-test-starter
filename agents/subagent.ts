@@ -101,7 +101,17 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
             signal,
         });
 
+        let lastTickAt = Date.now();
+        const GAP_THRESHOLD_MS = 3000;
+
         for await (const [namespace, mode, data] of stream) {
+            const gap = Date.now() - lastTickAt;
+            if (gap > GAP_THRESHOLD_MS) {
+                const ns = Array.isArray(namespace) && namespace.length ? namespace.join('/') : 'main';
+                logger.log(`[gap] ${gap}ms before next chunk (ns=${ns}, mode=${mode})`);
+            }
+            lastTickAt = Date.now();
+
             if (signal?.aborted) break;
             const isSubagent = namespace.some((s: string) => s.startsWith('tools:'));
 
@@ -257,6 +267,18 @@ export async function onRequest(context: any) {
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
         async start(controller) {
+            const HEARTBEAT_INTERVAL_MS = 5_000;
+
+            // Heartbeat: emit an SSE comment every 5s to keep intermediaries and clients
+            // from closing an idle connection.
+            const heartbeat = setInterval(() => {
+                try {
+                    controller.enqueue(encoder.encode(`: ping ${Date.now()}\n\n`));
+                } catch {
+                    /* controller already closed */
+                }
+            }, HEARTBEAT_INTERVAL_MS);
+
             try {
                 for await (const chunk of eventStream(agentInstance, message, signal)) {
                     if (signal?.aborted) break;
@@ -268,6 +290,7 @@ export async function onRequest(context: any) {
                 const errorEvent = `data: ${JSON.stringify({ type: "error_message", content: error.message, source: "main", node: "system" })}\n\n`;
                 controller.enqueue(encoder.encode(errorEvent));
             } finally {
+                clearInterval(heartbeat);
                 controller.close();
             }
         },

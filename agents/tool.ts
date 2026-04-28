@@ -108,17 +108,31 @@ function getAgent(modelInstance: Model) {
  */
 async function* eventStream(agentInstance: Agent, userMessage: string, signal?: AbortSignal): AsyncGenerator<string> {
     try {
+        logger.log(`starting stream for message: "${userMessage.slice(0, 80)}"`);
         const stream = await agentInstance.stream(
             { messages: [{ role: "user", content: userMessage }] },
             { streamMode: "messages", signal }
         );
 
+        let lastTickAt = Date.now();
+        let lastChunkKind: 'tool_call' | 'tool_result' | 'ai_response' | 'other' = 'other';
+        const GAP_THRESHOLD_MS = 3000;
+
         for await (const chunk of stream) {
+            const gap = Date.now() - lastTickAt;
+            if (gap > GAP_THRESHOLD_MS) {
+                // Annotate which chunk kind preceded the gap, so we can quickly locate stalls
+                // (a common case: tool_call → tool_result delay caused by DDG search latency).
+                logger.log(`[gap] ${gap}ms before next chunk (after=${lastChunkKind})`);
+            }
+            lastTickAt = Date.now();
+
             if (signal?.aborted) break;
             const [message] = chunk;
 
             // Streaming tool calls
             if (AIMessageChunk.isInstance(message) && message.tool_call_chunks?.length) {
+                lastChunkKind = 'tool_call';
                 for (const tc of message.tool_call_chunks) {
                     if (tc.name) {
                         logger.log(`tool call: ${tc.name}`);
@@ -133,6 +147,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
 
             // Tool results
             if (ToolMessage.isInstance(message)) {
+                lastChunkKind = 'tool_result';
                 logger.log(`tool result [${message.name}]: ${message.text?.slice(0, 150)}`);
                 yield `data: ${JSON.stringify({ type: 'tool_result', name: message.name, content: message.text?.slice(0, 500) })}\n\n`;
                 continue;
@@ -140,6 +155,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
 
             // AI text response
             if (AIMessageChunk.isInstance(message) && message.text) {
+                lastChunkKind = 'ai_response';
                 const cleaned = message.text.replace(/\n{3,}/g, '\n\n');
                 if (cleaned) {
                     logger.log('ai response:', cleaned);
@@ -147,6 +163,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
                 }
             }
         }
+        logger.log('stream completed');
     } catch (e: unknown) {
         const error = e as Error;
         if (error.name === 'AbortError' || signal?.aborted) {
@@ -189,6 +206,18 @@ export async function onRequest(context: any) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
         async start(controller) {
+            const HEARTBEAT_INTERVAL_MS = 5_000;
+
+            // Heartbeat: emit an SSE comment every 5s to keep intermediaries and clients
+            // from closing an idle connection.
+            const heartbeat = setInterval(() => {
+                try {
+                    controller.enqueue(encoder.encode(`: ping ${Date.now()}\n\n`));
+                } catch {
+                    /* controller already closed */
+                }
+            }, HEARTBEAT_INTERVAL_MS);
+
             try {
                 for await (const chunk of eventStream(agentInstance, message, signal)) {
                     if (signal?.aborted) break;
@@ -200,6 +229,7 @@ export async function onRequest(context: any) {
                 const errorEvent = `data: ${JSON.stringify({ type: "error_message", content: error.message, source: "main", node: "system" })}\n\n`;
                 controller.enqueue(encoder.encode(errorEvent));
             } finally {
+                clearInterval(heartbeat);
                 controller.close();
             }
         },

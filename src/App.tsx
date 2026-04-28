@@ -62,15 +62,26 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const outputRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // 用户是否贴在底部；只有贴底时新内容才自动滚动，避免用户上翻被强制拉回。
+  const stickToBottomRef = useRef(true);
 
   const route = ROUTES[activeIdx];
 
   const scrollToBottom = useCallback(() => {
+    if (!stickToBottomRef.current) return;
     requestAnimationFrame(() => {
-      if (outputRef.current) {
-        outputRef.current.scrollTop = outputRef.current.scrollHeight;
-      }
+      const el = outputRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
     });
+  }, []);
+
+  // 监听滚动：根据当前位置决定是否继续自动贴底。
+  // 距底 <= 8px 视为贴底（容忍浮点/亚像素误差及不同 DPR 的舍入）。
+  const handleOutputScroll = useCallback(() => {
+    const el = outputRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceFromBottom <= 8;
   }, []);
 
   const appendLine = useCallback((line: Omit<OutputLine, 'id'>) => {
@@ -111,6 +122,7 @@ export default function App() {
 
   const handleClear = () => {
     setLines([]);
+    stickToBottomRef.current = true;
   };
 
   // ─── Send Request ───
@@ -120,6 +132,8 @@ export default function App() {
 
     setLines([]);
     setLoading(true);
+    // 新一轮请求：重置为贴底，恢复自动滚动。
+    stickToBottomRef.current = true;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -198,7 +212,7 @@ export default function App() {
             Clear
           </button>
         </div>
-        <div className="output-box" ref={outputRef}>
+        <div className="output-box" ref={outputRef} onScroll={handleOutputScroll}>
           {lines.map(line => renderLine(line))}
         </div>
       </div>
@@ -285,7 +299,13 @@ async function sendSSERequest(
     buffer = parts.pop() ?? '';
 
     for (const part of parts) {
-      const line = part.replace(/^data: /, '').trim();
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+
+      // SSE 注释行（以 ':' 开头，如 ": ping 177..."）用作连接保活，按协议忽略，不展示到 UI。
+      if (trimmed.startsWith(':')) continue;
+
+      const line = trimmed.replace(/^data:\s*/, '');
       if (!line || line === '[DONE]') {
         if (line === '[DONE]') {
           appendLine({ kind: 'status', content: '\n✓ Stream complete' });
