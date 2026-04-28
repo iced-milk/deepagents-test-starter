@@ -302,7 +302,7 @@ async function sendSSERequest(
       const trimmed = part.trim();
       if (!trimmed) continue;
 
-      // SSE 注释行（以 ':' 开头，如 ": ping 177..."）用作连接保活，按协议忽略，不展示到 UI。
+      // SSE 注释行，按协议忽略，不展示到 UI。
       if (trimmed.startsWith(':')) continue;
 
       const line = trimmed.replace(/^data:\s*/, '');
@@ -324,6 +324,12 @@ async function sendSSERequest(
       const type = event.type as string;
 
       switch (type) {
+        case 'ping': {
+          // 心跳帧：后端每 5s 空闲时发 {"type":"ping","ts":...}，用于保活。
+          // 静默丢弃，不渲染到 UI。
+          break;
+        }
+
         case 'ai_response': {
           // If the source changed (e.g. main vs subagent), start a new text line
           const source = (event.agent as string) ?? 'main';

@@ -269,11 +269,13 @@ export async function onRequest(context: any) {
         async start(controller) {
             const HEARTBEAT_INTERVAL_MS = 5_000;
 
-            // Heartbeat: emit an SSE comment every 5s to keep intermediaries and clients
-            // from closing an idle connection.
+            // Heartbeat: emit a JSON data frame {"type":"ping","ts":<ms>} every 5s
+            // to keep intermediaries and clients from closing an idle connection.
+            // Frontend filters these via `case 'ping'` and does not render them.
             const heartbeat = setInterval(() => {
                 try {
-                    controller.enqueue(encoder.encode(`: ping ${Date.now()}\n\n`));
+                    const frame = `data: ${JSON.stringify({ type: 'ping', ts: Date.now() })}\n\n`;
+                    controller.enqueue(encoder.encode(frame));
                 } catch {
                     /* controller already closed */
                 }
