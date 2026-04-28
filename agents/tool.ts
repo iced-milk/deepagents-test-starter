@@ -7,8 +7,12 @@ import { z } from 'zod';
 type Model = Awaited<ReturnType<typeof initChatModel>>;
 type Agent = ReturnType<typeof createDeepAgent>;
 
-// ─── Unified logger with [tool][timestamp] prefix ───
+interface Env {
+    AI_GATEWAY_API_KEY: string;
+    AI_GATEWAY_BASE_URL: string;
+}
 
+// ─── Unified logger with [tool][timestamp] prefix ───
 const logger = {
     log(...args: unknown[]) {
         console.log(`[tool][${new Date().toISOString()}]`, ...args);
@@ -18,12 +22,7 @@ const logger = {
     },
 };
 
-interface EnvConfig {
-    LLM_MODEL: string;
-    LLM_API_KEY: string;
-    LLM_BASE_URL: string;
-    [KEY: string]: string;
-}
+const SYSTEM_PROMPT = `You are a helpful assistant. Today's date is ${new Date().toISOString().slice(0, 10)}. Use \`internet_search\` to look up information before answering. When searching, prefer including the current year or recent time range to get the latest results. Answer concisely.`;
 
 let model: Model | null = null;
 let agent: Agent | null = null;
@@ -55,16 +54,29 @@ const internetSearch = tool(
     }
 );
 
-const SYSTEM_PROMPT = `You are a helpful assistant. Today's date is ${new Date().toISOString().slice(0, 10)}. Use \`internet_search\` to look up information before answering. When searching, prefer including the current year or recent time range to get the latest results. Answer concisely.`;
+function getEnv(contextEnv: Record<string, string | undefined> | undefined): Env {
+    const source = contextEnv ?? {};
+    const required = ['AI_GATEWAY_API_KEY', 'AI_GATEWAY_BASE_URL'] as const;
+    const missing = required.filter((k) => !source[k]?.trim());
 
-async function getModel(env: EnvConfig) {
+    if (missing.length) {
+        throw new Error(`Missing environment variables: ${missing.join(', ')}`);
+    }
+
+    return {
+        AI_GATEWAY_API_KEY: source.AI_GATEWAY_API_KEY!,
+        AI_GATEWAY_BASE_URL: source.AI_GATEWAY_BASE_URL!,
+    };
+}
+
+async function getModel(env: Env) {
     if (!model) {
         logger.log('Initializing model...');
-        model = await initChatModel(env.LLM_MODEL, {
-            modelProvider: "openai",
-            apiKey: env.LLM_API_KEY,
+        model = await initChatModel('@Pages/glm-5', {
+            modelProvider: 'openai',
+            apiKey: env.AI_GATEWAY_API_KEY,
             configuration: {
-                baseURL: env.LLM_BASE_URL,
+                baseURL: env.AI_GATEWAY_BASE_URL,
             },
             temperature: 0,
             timeout: 300_000,
@@ -149,16 +161,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
 }
 
 export async function onRequest(context: any) {
-    const { env, request } = context;
-
-    const { LLM_MODEL, LLM_API_KEY, LLM_BASE_URL } = env;
-    if (!LLM_MODEL || !LLM_API_KEY || !LLM_BASE_URL) {
-        logger.error('Missing environment variables');
-        return new Response('Missing environment variables', { status: 500 });
-    }
-
-    const modelInstance = await getModel({ LLM_MODEL, LLM_API_KEY, LLM_BASE_URL });
-    const agentInstance = getAgent(modelInstance);
+    const { request, env } = context;
 
     const { message } = request?.body ?? {};
     logger.log('user message:', message);
@@ -168,6 +171,21 @@ export async function onRequest(context: any) {
     }
 
     const signal = request?.signal as AbortSignal | undefined;
+
+    let agentInstance: Agent;
+    try {
+        const envVars = getEnv(env);
+        const modelInstance = await getModel(envVars);
+        agentInstance = getAgent(modelInstance);
+    } catch (e) {
+        const msg = (e as Error).message;
+        logger.error(msg);
+        return new Response(JSON.stringify({ error: msg }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+        });
+    }
+
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
         async start(controller) {
