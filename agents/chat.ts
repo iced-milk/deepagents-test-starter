@@ -43,7 +43,7 @@ function getEnv(contextEnv: Record<string, string | undefined> | undefined): Env
 async function getModel(env: Env) {
     if (!model) {
         logger.log('Initializing model...');
-        model = await initChatModel('@Pages/glm-5', {
+        model = await initChatModel('@Pages/deepseek-v4-flash', {
             modelProvider: 'openai',
             apiKey: env.AI_GATEWAY_API_KEY,
             configuration: {
@@ -89,12 +89,13 @@ export async function onRequest(context: any) {
 
         const result = await agentInstance.invoke(
             { messages: [{ role: "user", content: userMessage }] },
-            { signal },
         );
         const messages = (result as any).messages;
         logger.log('ai:', messages[messages.length - 1].content);
 
-        return new Response(JSON.stringify({ response: messages[messages.length - 1].content }), {
+        return new Response(JSON.stringify({
+            response: messages[messages.length - 1].content,
+        }), {
             status: 200,
             headers: { 'Content-Type': 'application/json; charset=UTF-8' },
         });

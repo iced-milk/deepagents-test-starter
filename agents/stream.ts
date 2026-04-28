@@ -43,7 +43,7 @@ function getEnv(contextEnv: Record<string, string | undefined> | undefined): Env
 async function getModel(env: Env) {
     if (!model) {
         logger.log('Initializing model...');
-        model = await initChatModel('@Pages/glm-5', {
+        model = await initChatModel('@Pages/deepseek-v4-flash', {
             modelProvider: 'openai',
             apiKey: env.AI_GATEWAY_API_KEY,
             configuration: {
@@ -79,7 +79,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
         logger.log(`starting stream for message: "${userMessage.slice(0, 80)}"`);
         const stream = await agentInstance.stream(
             { messages: [{ role: "user", content: userMessage }] },
-            { streamMode: "messages", signal }
+            { streamMode: "messages" }
         );
 
         let lastTickAt = Date.now();
@@ -118,7 +118,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
 }
 
 export async function onRequest(context: any) {
-    const { request, env } = context;
+    const { request, env, conversation_id: conversationId } = context;
 
     const { message } = request?.body ?? {};
     logger.log('user message:', message);
@@ -147,6 +147,12 @@ export async function onRequest(context: any) {
     const stream = new ReadableStream({
         async start(controller) {
             const HEARTBEAT_INTERVAL_MS = 5_000;
+
+            // Session frame: emit conversationId first so the client can save it
+            if (conversationId) {
+                const sessionFrame = `data: ${JSON.stringify({ type: 'session', conversationId })}\n\n`;
+                controller.enqueue(encoder.encode(sessionFrame));
+            }
 
             // Heartbeat: emit a JSON data frame {"type":"ping","ts":<ms>} every 5s
             // to keep intermediaries and clients from closing an idle connection.

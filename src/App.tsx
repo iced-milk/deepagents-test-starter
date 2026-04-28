@@ -62,6 +62,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const outputRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // 当前活跃请求返回的 conversationId（由后端 runtime 注入）
+  const conversationIdRef = useRef<string | null>(null);
   // 用户是否贴在底部；只有贴底时新内容才自动滚动，避免用户上翻被强制拉回。
   const stickToBottomRef = useRef(true);
 
@@ -109,10 +111,17 @@ export default function App() {
   };
 
   const handleStop = useCallback(async () => {
-    try {
-      await fetch('/stop', { method: 'POST' });
-    } catch {
-      // 忽略 stop 请求失败
+    const conversationId = conversationIdRef.current;
+    if (conversationId) {
+      try {
+        await fetch('/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId }),
+        });
+      } catch {
+        // 忽略 stop 请求失败
+      }
     }
     // 前端 abort fetch 连接（断开 SSE 读取 / JSON 等待）
     abortRef.current?.abort();
@@ -134,6 +143,8 @@ export default function App() {
     setLoading(true);
     // 新一轮请求：重置为贴底，恢复自动滚动。
     stickToBottomRef.current = true;
+    // 清空上一轮的 conversationId，避免误用作本轮的 stop 目标。
+    conversationIdRef.current = null;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -142,7 +153,7 @@ export default function App() {
       if (route.type === 'json') {
         await sendJsonRequest(route, message, controller.signal, appendLine);
       } else {
-        await sendSSERequest(route, message, controller.signal, appendLine, appendToLastText);
+        await sendSSERequest(route, message, controller.signal, appendLine, appendToLastText, conversationIdRef);
       }
     } catch (err: unknown) {
       if ((err as Error).name !== 'AbortError') {
@@ -271,6 +282,7 @@ async function sendSSERequest(
   signal: AbortSignal,
   appendLine: (line: Omit<OutputLine, 'id'>) => void,
   appendToLastText: (text: string) => void,
+  conversationIdRef: { current: string | null },
 ) {
   const res = await fetch(route.path, {
     method: 'POST',
@@ -324,6 +336,17 @@ async function sendSSERequest(
       const type = event.type as string;
 
       switch (type) {
+        case 'session': {
+          // 会话标识帧：后端在 SSE 首帧下发 {"type":"session","conversationId":"..."}
+          // 供前端保存，点击 Stop 时通过 /stop 接口传回用于精准打断。
+          // 不打印到 UI。
+          const cid = event.conversationId;
+          if (typeof cid === 'string' && cid) {
+            conversationIdRef.current = cid;
+          }
+          break;
+        }
+
         case 'ping': {
           // 心跳帧：后端每 5s 空闲时发 {"type":"ping","ts":...}，用于保活。
           // 静默丢弃，不渲染到 UI。
