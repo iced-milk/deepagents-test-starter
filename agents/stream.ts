@@ -79,7 +79,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
         logger.log(`starting stream for message: "${userMessage.slice(0, 80)}"`);
         const stream = await agentInstance.stream(
             { messages: [{ role: "user", content: userMessage }] },
-            { streamMode: "messages" }
+            { streamMode: "messages", signal }
         );
 
         let lastTickAt = Date.now();

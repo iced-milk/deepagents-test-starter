@@ -89,6 +89,7 @@ export async function onRequest(context: any) {
 
         const result = await agentInstance.invoke(
             { messages: [{ role: "user", content: userMessage }] },
+            { signal },
         );
         const messages = (result as any).messages;
         logger.log('ai:', messages[messages.length - 1].content);

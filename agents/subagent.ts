@@ -98,6 +98,7 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
         const stream = await agentInstance.stream(input, {
             streamMode: ["updates", "messages"],
             subgraphs: true,
+            signal,
         });
 
         let lastTickAt = Date.now();
