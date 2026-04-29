@@ -243,6 +243,9 @@ html, body, #root {
   border-radius: 8px;
   padding: 16px;
   overflow-y: auto;
+  /* 禁用 Chrome 的 scroll anchoring，避免流式追加内容时浏览器自动上调 scrollTop，
+     造成"滚动条自己往上爬、自动贴底失效"的现象。 */
+  overflow-anchor: none;
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.7;

@@ -66,6 +66,12 @@ export default function App() {
   const conversationIdRef = useRef<string | null>(null);
   // 用户是否贴在底部；只有贴底时新内容才自动滚动，避免用户上翻被强制拉回。
   const stickToBottomRef = useRef(true);
+  // 标记"这次 scroll 事件是我们自己 scrollTop= 触发的"，
+  // 避免把程序化滚动再反馈回 stickToBottom 判定。
+  // 原因：rAF 里设 scrollTop 之后，浏览器会在稍晚派发一次 scroll 事件；
+  // 若此时 React 又追加了新内容、scrollHeight 变大，distanceFromBottom 会
+  // 被算成 > 阈值，stickToBottom 被误判为 false，之后就再也不自动滚了。
+  const isProgrammaticScrollRef = useRef(false);
 
   const route = ROUTES[activeIdx];
 
@@ -73,13 +79,20 @@ export default function App() {
     if (!stickToBottomRef.current) return;
     requestAnimationFrame(() => {
       const el = outputRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (!el) return;
+      isProgrammaticScrollRef.current = true;
+      el.scrollTop = el.scrollHeight - el.clientHeight;
     });
   }, []);
 
   // 监听滚动：根据当前位置决定是否继续自动贴底。
   // 距底 <= 8px 视为贴底（容忍浮点/亚像素误差及不同 DPR 的舍入）。
   const handleOutputScroll = useCallback(() => {
+    // 跳过我们自己发起的滚动，只响应用户的滚轮/拖拽。
+    if (isProgrammaticScrollRef.current) {
+      isProgrammaticScrollRef.current = false;
+      return;
+    }
     const el = outputRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
