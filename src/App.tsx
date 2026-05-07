@@ -16,7 +16,7 @@ const ROUTES: RouteConfig[] = [
     label: '/chat',
     description: '同步聊天 — invoke() 返回完整 JSON 响应',
     type: 'json',
-    defaultMessage: '什么是 TypeScript ？',
+    defaultMessage: '什么是 TypeScript？',
   },
   {
     path: '/stream',

@@ -20,7 +20,7 @@ export async function onRequest(context: any) {
     return new Response('Missing conversationId', { status: 400 });
   }
 
-  const ret = context.abortActiveRun(conversationId);
+  const ret = context.utils.abortActiveRun(conversationId);
   logger.log('abortActiveRun result:', ret);
 
   const data = {
