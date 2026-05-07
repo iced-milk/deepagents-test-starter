@@ -52,6 +52,8 @@ async function getModel(env: Env) {
             temperature: 0,
             timeout: 300_000,
         });
+    } else {
+        logger.log('Model already initialized, reusing');
     }
     return model;
 }
@@ -67,6 +69,8 @@ function getAgent(modelInstance: Model) {
                 modelCallLimitMiddleware({ runLimit: 30 }),
             ],
         });
+    } else {
+        logger.log('Agent already initialized, reusing');
     }
     return agent;
 }
@@ -118,7 +122,8 @@ async function* eventStream(agentInstance: Agent, userMessage: string, signal?: 
 }
 
 export async function onRequest(context: any) {
-    const { request, env, conversation_id: conversationId } = context;
+    const { request, env, conversation_id: conversationId, run_id: runId } = context;
+    logger.log('conversationId:', conversationId, 'runId:', runId);
 
     const { message } = request?.body ?? {};
     logger.log('user message:', message);
@@ -147,12 +152,6 @@ export async function onRequest(context: any) {
     const stream = new ReadableStream({
         async start(controller) {
             const HEARTBEAT_INTERVAL_MS = 5_000;
-
-            // Session frame: emit conversationId first so the client can save it
-            if (conversationId) {
-                const sessionFrame = `data: ${JSON.stringify({ type: 'session', conversationId })}\n\n`;
-                controller.enqueue(encoder.encode(sessionFrame));
-            }
 
             // Heartbeat: emit a JSON data frame {"type":"ping","ts":<ms>} every 5s
             // to keep intermediaries and clients from closing an idle connection.

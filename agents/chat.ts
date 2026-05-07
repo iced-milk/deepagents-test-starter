@@ -52,6 +52,8 @@ async function getModel(env: Env) {
             temperature: 0,
             timeout: 300_000,
         });
+    } else {
+        logger.log('Model already initialized, reusing');
     }
     return model;
 }
@@ -67,12 +69,15 @@ function getAgent(modelInstance: Model) {
                 modelCallLimitMiddleware({ runLimit: 30 }),
             ],
         });
+    } else {
+        logger.log('Agent already initialized, reusing');
     }
     return agent;
 }
 
 export async function onRequest(context: any) {
-    const { request, env } = context;
+    const { request, env, conversation_id: conversationId, run_id: runId } = context;
+    logger.log('conversationId:', conversationId, 'runId:', runId);
 
     const { message: userMessage } = request?.body ?? {};
     logger.log('user message:', userMessage);

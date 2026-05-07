@@ -1,7 +1,6 @@
 export async function onRequest(context: any) {
   const data =  {
     status: 'ok',
-    conversationId: context.conversation_id,
     runId: context.run_id,
     env: context.env,
   };
